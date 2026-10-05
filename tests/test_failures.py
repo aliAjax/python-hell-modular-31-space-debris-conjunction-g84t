@@ -32,22 +32,22 @@ class FailureTest(unittest.TestCase):
         os.unlink(self.tmp.name)
 
     def test_duplicate_and_permission_failures(self):
-        item = self.service.create_item(self.payload, "a", "analyst")
+        item = self.service.create_item(self.payload, "a", "analyst", region="east")
         with self.assertRaises(ConflictError):
-            self.service.create_item(self.payload, "a", "analyst")
+            self.service.create_item(self.payload, "a", "analyst", region="east")
         with self.assertRaises(DomainError) as context:
-            self.service.act(item["id"], "assess", {"hours_to_tca": 2}, "x", "operator", item["version"])
+            self.service.act(item["id"], "assess", {"hours_to_tca": 2}, "x", "operator", item["version"], region="east")
         self.assertEqual(context.exception.status, 403)
 
     def test_version_conflict_and_conflicting_opinion(self):
-        item = self.service.create_item(self.payload, "a", "analyst")
-        item = self.service.act(item["id"], "assess", {"hours_to_tca": 2}, "a", "analyst", item["version"])
-        item = self.service.act(item["id"], "record_opinion", {"operator": "Org-A", "opinion": "reject", "reason": "unsafe"}, "operator-1", "operator", item["version"])
+        item = self.service.create_item(self.payload, "a", "analyst", region="east")
+        item = self.service.act(item["id"], "assess", {"hours_to_tca": 2}, "a", "analyst", item["version"], region="east")
+        item = self.service.act(item["id"], "record_opinion", {"operator": "Org-A", "opinion": "reject", "reason": "unsafe"}, "operator-1", "operator", item["version"], region="east")
         with self.assertRaises(DomainError) as context:
-            self.service.act(item["id"], "approve", {"fuel_cost_m_s": 1, "maneuver_window": "w"}, "c", "coordinator", item["version"])
+            self.service.act(item["id"], "approve", {"fuel_cost_m_s": 1, "maneuver_window": "w"}, "c", "coordinator", item["version"], region="east")
         self.assertEqual(context.exception.code, "unresolved_conflict")
         with self.assertRaises(ConflictError):
-            self.service.act(item["id"], "record_opinion", {"operator": "Org-A", "opinion": "approve"}, "operator-1", "operator", item["version"] - 1)
+            self.service.act(item["id"], "record_opinion", {"operator": "Org-A", "opinion": "approve"}, "operator-1", "operator", item["version"] - 1, region="east")
 
 
 if __name__ == "__main__":

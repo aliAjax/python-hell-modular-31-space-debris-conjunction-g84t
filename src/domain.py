@@ -25,6 +25,12 @@ def require_text(payload, name):
     return value.strip()
 
 
+def require_region(region):
+    if not isinstance(region, str) or not region.strip():
+        raise DomainError("region_required", "缺少辖区（X-Region 请求头）", 400)
+    return region.strip()
+
+
 def number(payload, name, minimum=None):
     value = payload.get(name)
     if isinstance(value, bool):

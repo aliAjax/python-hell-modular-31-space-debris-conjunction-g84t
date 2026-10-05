@@ -45,18 +45,21 @@ def build_handler(service, static_dir):
 
         def do_GET(self):
             try:
+                actor, role, region = self._identity()
                 path = urlparse(self.path).path
                 if path == "/health":
                     return self._send(200, {"status": "ok"})
                 if path == "/api/state":
-                    return self._send(200, service.state())
+                    return self._send(200, service.state(region, role))
                 if path == "/api/items":
-                    return self._send(200, {"items": service.list_items()})
+                    return self._send(200, {"items": service.list_items(None, region, role)})
+                if path == "/api/claims":
+                    return self._send(200, {"items": service.list_pending_claim(actor, role)})
                 parts = [part for part in path.split("/") if part]
                 if len(parts) == 3 and parts[:2] == ["api", "items"]:
-                    return self._send(200, service.get_item(int(parts[2])))
+                    return self._send(200, service.get_item(int(parts[2]), region, role))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
-                    item = service.get_item(int(parts[2]))
+                    item = service.get_item(int(parts[2]), region, role)
                     return self._send(200, {"events": item["audit"]})
                 if path == "/":
                     file_path = os.path.join(static_dir, "index.html")
@@ -86,6 +89,11 @@ def build_handler(service, static_dir):
                         raise DomainError("action_required", "缺少 action", 400)
                     expected = payload.pop("expected_version", None)
                     return self._send(200, service.act(int(parts[2]), action, payload, actor, role, expected, region))
+                if parts == ["api", "admin", "backfill"]:
+                    return self._send(200, service.backfill_regions(actor, role))
+                if parts == ["api", "claims"]:
+                    item_ids = payload.get("item_ids", [])
+                    return self._send(200, service.claim_items(item_ids, actor, role, region))
                 return self._send(404, {"error": "not_found", "message": "接口不存在"})
             except DomainError as exc:
                 return self._error(exc)

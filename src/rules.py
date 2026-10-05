@@ -13,8 +13,61 @@ ACTION_ROLES = {
     "cancel": {"coordinator"},
     "report_revision": {"analyst"},
 }
-ENFORCE_REGION = False
-REGION_SENSITIVE_ACTIONS = set()
+
+# 辖区隔离：开启后，建单、读取、修改都必须落在同一辖区；
+# 越权请求在写入前直接挡回，不留任何审计/操作痕迹。
+ENFORCE_REGION = True
+REGION_SENSITIVE_ACTIONS = {
+    "assess",
+    "record_opinion",
+    "approve",
+    "execute",
+    "resolve",
+    "cancel",
+    "report_revision",
+}
+# 可跨辖区的角色（监管员处理认领池）。
+REGION_BYPASS_ROLES = {"regulator"}
+
+# 历史数据回填：按创建者与运营方组织推断辖区。
+# 实际部署时这应来自用户目录与组织目录，这里用表演数据。
+CREATOR_REGION = {
+    "analyst-1": "east",
+    "analyst-2": "west",
+    "coordinator-1": "east",
+    "coordinator-2": "west",
+    "operator-1": "east",
+    "operator-2": "west",
+}
+ORGANIZATION_REGION = {
+    "Org-A": "east",
+    "Org-B": "west",
+    "Org-C": "south",
+}
+
+# 已知辖区（用于校验 X-Region 取值）。
+REGIONS = ("east", "west", "south", "north")
+
+
+def valid_region(region):
+    return isinstance(region, str) and bool(region.strip())
+
+
+def infer_region(created_by, operating_organizations):
+    """按创建者与运营方组织推断辖区。
+
+    创建者与组织给出的辖区唯一时返回该辖区；
+    给不出或相互冲突时返回 None（挂起，等待监管员认领）。
+    """
+    candidates = set()
+    if created_by in CREATOR_REGION:
+        candidates.add(CREATOR_REGION[created_by])
+    for org in operating_organizations or []:
+        if org in ORGANIZATION_REGION:
+            candidates.add(ORGANIZATION_REGION[org])
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return None
 ACTION_REQUIRES_VERSION = {"approve", "execute", "resolve", "cancel"}
 
 

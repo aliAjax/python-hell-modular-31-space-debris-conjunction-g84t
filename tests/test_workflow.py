@@ -30,17 +30,17 @@ class WorkflowTest(unittest.TestCase):
             "fuel_budget_m_s": 5,
             "track_age_hours": 1,
             "operating_organizations": ["Org-A", "Org-B"],
-        }, "analyst-1", "analyst")
-        item = self.service.act(item["id"], "assess", {"hours_to_tca": 18}, "analyst-1", "analyst", item["version"])
+        }, "analyst-1", "analyst", region="east")
+        item = self.service.act(item["id"], "assess", {"hours_to_tca": 18}, "analyst-1", "analyst", item["version"], region="east")
         self.assertEqual(item["status"], "assessed")
         self.assertEqual(item["payload"]["assessment"]["level"], "high")
         item = self.service.act(item["id"], "approve", {
             "fuel_cost_m_s": 2.5,
             "maneuver_window": "2026-09-28T08:00:00Z/2026-09-28T09:00:00Z",
-        }, "coordinator-1", "coordinator", item["version"])
+        }, "coordinator-1", "coordinator", item["version"], region="east")
         self.assertEqual(item["status"], "coordinating")
-        item = self.service.act(item["id"], "execute", {"command_ref": "CMD-7"}, "operator-1", "operator", item["version"])
-        item = self.service.act(item["id"], "resolve", {"report_ref": "RPT-7"}, "coordinator-1", "coordinator", item["version"])
+        item = self.service.act(item["id"], "execute", {"command_ref": "CMD-7"}, "operator-1", "operator", item["version"], region="east")
+        item = self.service.act(item["id"], "resolve", {"report_ref": "RPT-7"}, "coordinator-1", "coordinator", item["version"], region="east")
         self.assertEqual(item["status"], "resolved")
         self.assertGreaterEqual(len(item["audit"]), 5)
 
