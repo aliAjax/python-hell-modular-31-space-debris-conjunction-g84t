@@ -48,21 +48,24 @@ def build_handler(service, static_dir):
                 path = urlparse(self.path).path
                 if path == "/health":
                     return self._send(200, {"status": "ok"})
-                if path == "/api/state":
-                    return self._send(200, service.state())
-                if path == "/api/items":
-                    return self._send(200, {"items": service.list_items()})
-                parts = [part for part in path.split("/") if part]
-                if len(parts) == 3 and parts[:2] == ["api", "items"]:
-                    return self._send(200, service.get_item(int(parts[2])))
-                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
-                    item = service.get_item(int(parts[2]))
-                    return self._send(200, {"events": item["audit"]})
                 if path == "/":
                     file_path = os.path.join(static_dir, "index.html")
                     with open(file_path, "rb") as handle:
                         content = handle.read()
                     return self._send(200, content, "text/html; charset=utf-8")
+                actor, role, region = self._identity()
+                if path == "/api/state":
+                    return self._send(200, service.state(actor, role, region))
+                if path == "/api/items":
+                    return self._send(200, {"items": service.list_items(actor, role, region)})
+                if path == "/api/claims/pending":
+                    return self._send(200, {"items": service.pending_claims(actor, role, region)})
+                parts = [part for part in path.split("/") if part]
+                if len(parts) == 3 and parts[:2] == ["api", "items"]:
+                    return self._send(200, service.get_item(int(parts[2]), actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
+                    item = service.get_item(int(parts[2]), actor, role, region)
+                    return self._send(200, {"events": item["audit"]})
                 return self._send(404, {"error": "not_found", "message": "接口不存在"})
             except DomainError as exc:
                 return self._error(exc)
@@ -78,6 +81,10 @@ def build_handler(service, static_dir):
                 parts = [part for part in path.split("/") if part]
                 if parts == ["api", "items"]:
                     return self._send(201, service.create_item(payload, actor, role, region))
+                if parts == ["api", "claims"]:
+                    return self._send(200, service.claim(payload, actor, role, region))
+                if parts == ["api", "directory"]:
+                    return self._send(200, service.register_directory(payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "sources":
                     return self._send(201, service.add_source(int(parts[2]), payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "actions":

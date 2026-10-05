@@ -70,10 +70,21 @@ class Repository:
                     event_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS region_directory (
+                    subject_type TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    region TEXT NOT NULL,
+                    UNIQUE(subject_type, subject)
+                );
                 """
             )
+            columns = [row["name"] for row in conn.execute("PRAGMA table_info(items)").fetchall()]
+            if "region" not in columns:
+                conn.execute("ALTER TABLE items ADD COLUMN region TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_items_region ON items(region)")
         finally:
             conn.close()
+        self.backfill_regions()
 
     def _row_to_item(self, row):
         if row is None:
@@ -105,13 +116,13 @@ class Repository:
             (item_id, event_type, actor, role, canonical_json(payload), previous, event_hash, event["created_at"]),
         )
 
-    def create_item(self, entity_type, stable_key, initial_status, payload, actor, role):
+    def create_item(self, entity_type, stable_key, initial_status, payload, actor, role, region=None):
         conn = self.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 conn.execute(
-                    "INSERT INTO items(entity_type,stable_key,status,version,payload,created_by,created_role,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO items(entity_type,stable_key,status,version,payload,created_by,created_role,created_at,updated_at,region) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (
                         entity_type,
                         stable_key,
@@ -122,12 +133,13 @@ class Repository:
                         role,
                         now_iso(),
                         now_iso(),
+                        region,
                     ),
                 )
             except sqlite3.IntegrityError:
                 raise ConflictError("duplicate_item", "同一业务实体已经存在")
             item_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-            self.append_audit(conn, item_id, "created", actor, role, {"stable_key": stable_key})
+            self.append_audit(conn, item_id, "created", actor, role, {"stable_key": stable_key, "region": region})
             conn.execute("COMMIT")
             return self.get_item(item_id)
         except Exception:
@@ -149,14 +161,114 @@ class Repository:
         finally:
             conn.close()
 
-    def list_items(self, status=None):
+    def list_items(self, status=None, region=None, unassigned=False):
         conn = self.connect()
         try:
+            clauses = []
+            params = []
             if status:
-                rows = conn.execute("SELECT * FROM items WHERE status=? ORDER BY id DESC", (status,)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM items ORDER BY id DESC").fetchall()
+                clauses.append("status=?")
+                params.append(status)
+            if unassigned:
+                clauses.append("region IS NULL")
+            elif region is not None:
+                clauses.append("region=?")
+                params.append(region)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            rows = conn.execute("SELECT * FROM items" + where + " ORDER BY id DESC", params).fetchall()
             return [self._row_to_item(row) for row in rows]
+        finally:
+            conn.close()
+
+    def _directory_region(self, conn, subject_type, subject):
+        row = conn.execute(
+            "SELECT region FROM region_directory WHERE subject_type=? AND subject=?",
+            (subject_type, subject),
+        ).fetchone()
+        return row["region"] if row else None
+
+    def upsert_directory(self, subject_type, subject, region):
+        conn = self.connect()
+        try:
+            conn.execute(
+                "INSERT INTO region_directory(subject_type,subject,region) VALUES(?,?,?) "
+                "ON CONFLICT(subject_type,subject) DO UPDATE SET region=excluded.region",
+                (subject_type, subject, region),
+            )
+        finally:
+            conn.close()
+
+    def backfill_regions(self):
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            assigned = []
+            suspended = []
+            rows = conn.execute(
+                "SELECT id, created_by, payload FROM items WHERE region IS NULL ORDER BY id"
+            ).fetchall()
+            for row in rows:
+                payload = json.loads(row["payload"])
+                region = self._directory_region(conn, "user", row["created_by"])
+                basis = "creator"
+                if region is None:
+                    org_regions = {
+                        self._directory_region(conn, "org", org)
+                        for org in payload.get("operating_organizations", [])
+                    }
+                    org_regions.discard(None)
+                    if len(org_regions) == 1:
+                        region = org_regions.pop()
+                        basis = "organization"
+                if region is None:
+                    suspended.append(row["id"])
+                    continue
+                conn.execute(
+                    "UPDATE items SET region=?, updated_at=? WHERE id=? AND region IS NULL",
+                    (region, now_iso(), row["id"]),
+                )
+                self.append_audit(
+                    conn,
+                    row["id"],
+                    "region_backfilled",
+                    "system",
+                    "system",
+                    {"region": region, "basis": basis},
+                )
+                assigned.append(row["id"])
+            conn.execute("COMMIT")
+            return {"assigned": assigned, "suspended": suspended}
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def claim_items(self, item_ids, region, actor, role):
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            claimed = []
+            for item_id in item_ids:
+                cursor = conn.execute(
+                    "UPDATE items SET region=?, updated_at=? WHERE id=? AND region IS NULL",
+                    (region, now_iso(), item_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError("already_claimed", "部分记录不存在或已被其他监管员认领")
+                self.append_audit(conn, item_id, "region_claimed", actor, role, {"region": region})
+                claimed.append(item_id)
+            conn.execute("COMMIT")
+            return claimed
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         finally:
             conn.close()
 
@@ -250,12 +362,18 @@ class Repository:
         finally:
             conn.close()
 
-    def state_summary(self):
+    def state_summary(self, region=None):
         conn = self.connect()
         try:
             counts = {}
-            for row in conn.execute("SELECT status, COUNT(*) AS total FROM items GROUP BY status").fetchall():
+            if region is None:
+                rows = conn.execute("SELECT status, COUNT(*) AS total FROM items GROUP BY status").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT status, COUNT(*) AS total FROM items WHERE region=? GROUP BY status", (region,)
+                ).fetchall()
+            for row in rows:
                 counts[row["status"]] = row["total"]
-            return {"counts": counts, "items": self.list_items()}
+            return {"counts": counts, "items": self.list_items(region=region)}
         finally:
             conn.close()

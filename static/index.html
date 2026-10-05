@@ -1,7 +1,11 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><title>太空碎片接近协调</title>
-<body><h1>太空碎片接近预警与规避协调</h1><p>服务已启动。使用 JSON API 创建接近事件、记录来源、执行评估和协调动作。</p><pre>GET /health
+<body><h1>太空碎片接近预警与规避协调</h1><p>服务已启动。所有 /api 请求需携带 X-User-Id、X-Role、X-Region 身份头；读取和修改都限定在当前辖区，越权请求按记录不存在处理。</p><pre>GET /health
 GET /api/state
+GET /api/items
 POST /api/items
 POST /api/items/{id}/sources
-POST /api/items/{id}/actions</pre></body></html>
+POST /api/items/{id}/actions
+GET /api/claims/pending
+POST /api/claims
+POST /api/directory</pre></body></html>

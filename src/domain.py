@@ -92,6 +92,36 @@ def normalize_create(payload):
     }
 
 
+def normalize_claim(payload):
+    value = payload.get("item_ids")
+    if not isinstance(value, list) or not value:
+        raise DomainError("invalid_item_ids", "item_ids 必须是非空数组")
+    item_ids = []
+    for entry in value:
+        if isinstance(entry, bool):
+            raise DomainError("invalid_item_ids", "item_ids 必须是正整数数组")
+        try:
+            entry = int(entry)
+        except (TypeError, ValueError):
+            raise DomainError("invalid_item_ids", "item_ids 必须是正整数数组")
+        if entry <= 0:
+            raise DomainError("invalid_item_ids", "item_ids 必须是正整数数组")
+        if entry not in item_ids:
+            item_ids.append(entry)
+    return item_ids
+
+
+def normalize_directory(payload):
+    subject_type = require_text(payload, "subject_type")
+    if subject_type not in {"user", "org"}:
+        raise DomainError("invalid_subject_type", "subject_type 必须是 user 或 org")
+    return {
+        "subject_type": subject_type,
+        "subject": require_text(payload, "subject"),
+        "region": require_text(payload, "region"),
+    }
+
+
 def normalize_source(payload):
     source_type = require_text(payload, "source_type")
     external_id = require_text(payload, "external_id")

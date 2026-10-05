@@ -13,8 +13,6 @@ ACTION_ROLES = {
     "cancel": {"coordinator"},
     "report_revision": {"analyst"},
 }
-ENFORCE_REGION = False
-REGION_SENSITIVE_ACTIONS = set()
 ACTION_REQUIRES_VERSION = {"approve", "execute", "resolve", "cancel"}
 
 
